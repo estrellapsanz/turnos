@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Asistencia — dayGridWeek (Mañana/Tarde)</title>
+  <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.css" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
+  <style>
+    body{font-family:system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; margin:18px;}
+    h1{font-size:1.2rem;margin-bottom:8px}
+    #controls{display:flex;gap:8px;align-items:center;margin-bottom:10px}
+    #calendar{max-width:1400px;margin:0 auto}
+
+    /* Estilos para la nueva presentación de estadísticas */
+    .fc-daygrid-day-frame {
+        display: flex;
+        flex-direction: column; 
+    }
+    .cell-content-wrapper {
+        flex-grow: 1;
+        display: flex; 
+        flex-direction: row;
+        padding-bottom: 4px;
+    }
+    .cell-shifts{
+        display:flex;
+        flex-direction:column;
+        gap:6px;
+        margin-top:6px;
+        flex-grow:1
+    }
+    .stats-container {
+        padding: 8px;
+        font-size: 0.85rem;
+        border-top: 1px solid #ddd;
+    }
+    .employee-stats-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        margin-bottom: 10px; /* Espacio antes de las stats del día */
+    }
+    .employee-stats-list li {
+        margin-bottom: 4px;
+        display: flex;
+        justify-content: space-between;
+        line-height: 1.2;
+    }
+    .day-stats {
+        font-weight: 600;
+        text-align: right;
+    }
+
+
+    /* Estilos existentes */
+    .shift{border-radius:6px;padding:6px;font-size:0.82rem;background:#f7f7f7;border:1px solid rgba(0,0,0,0.05);position:relative}
+    .shift-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+    .shift .list{display:flex;flex-wrap:wrap;gap:6px}
+    .entry{padding:4px 6px;border-radius:4px;display:inline-flex;align-items:center;gap:8px;color:#fff;font-weight:500}
+    .entry.presencial{background:#28a745;border:1px solid #1c7c31}
+    .entry.teletrabajo{background:#007bff;border:1px solid #0056b3}
+    .entry .del{border:0;background:transparent;cursor:pointer;font-size:0.9rem;color:#fff}
+
+    .add-btn{padding:4px 8px;border-radius:6px;border:1px solid rgba(0,0,0,0.08);background:transparent;cursor:pointer}
+
+    .modal{position:fixed;inset:0;display:none;align-items:flex-start;justify-content:flex-start;background:rgba(0,0,0,0.1);z-index:9999;cursor:move}
+    .modal.open{display:flex}
+    .modal-card{background:#fff;padding:16px;border-radius:8px;min-width:320px;max-width:420px;box-shadow:0 6px 24px rgba(0,0,0,0.2);position:absolute}
+    .modal-card label{display:block;margin-top:8px;font-size:0.9rem}
+    .modal-card select{width:100%;padding:8px;border-radius:6px;border:1px solid #ddd;margin-top:6px}
+    .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
+    .btn{padding:6px 10px;border-radius:6px;border:0;cursor:pointer}
+    .btn.primary{background:#007bff;color:white}
+    .btn.ghost{background:transparent;border:1px solid #ccc}
+
+    #help{font-size:0.9rem;color:#333;margin-bottom:8px}
+
+    @media (max-width:700px){
+      .cell-shifts{gap:8px}
+      .shift{font-size:0.78rem}
+    }
+  </style>
+</head>
+<body>
+  <h1>Registro de asistencia (vista semana — mañana/tarde)</h1>
+  <div id="controls">
+    <div id="help">Haz click en <strong>Añadir</strong> dentro de la celda del día que quieras. Los datos se guardan en tu navegador.</div>
+    <button id="exportBtn" class="btn">Exportar JSON</button>
+    <button id="importBtn" class="btn">Importar JSON</button>
+    <button id="clearBtn" class="btn">Borrar todo</button>
+  </div>
+
+  <div id="calendar"></div>
+
+  <div id="modal" class="modal" role="dialog" aria-hidden="true">
+    <div class="modal-card">
+      <div style="font-weight:600;margin-bottom:8px;cursor:move" id="modal-header">Añadir trabajador</div>
+      <div id="modal-date" style="font-size:0.9rem;color:#555"></div>
+      <label>Empleado</label>
+      <select id="modal-name">
+        <option value="Alejandra">Alejandra</option>
+        <option value="Alejandro">Alejandro</option>
+        <option value="Carmen">Carmen</option>
+        <option value="Cris">Cris</option>
+        <option value="Estrella">Estrella</option>
+        <option value="Loida">Loida</option>
+        <option value="Mayte">Mayte</option>
+        <option value="Patricia">Patricia</option>
+        <option value="Susana">Susana</option>
+        <option value="Tati">Tati</option>
+        <option value="Yolanda">Yolanda</option>
+      </select>
+      <label>Tipo</label>
+      <select id="modal-type">
+        <option value="presencial">Presencial</option>
+        <option value="teletrabajo">Teletrabajo</option>
+      </select>
+      <div class="modal-actions">
+        <button class="btn primary" id="modal-add-btn">Añadir</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function(){
+      const storageKey = 'asistencia_daygrid_v1';
+      let data = loadData();
+
+      const calendarEl = document.getElementById('calendar');
+      const modal = document.getElementById('modal');
+      const modalCard = modal.querySelector('.modal-card');
+      const modalHeader = document.getElementById('modal-header');
+      const modalDate = document.getElementById('modal-date');
+      const modalName = document.getElementById('modal-name');
+      const modalType = document.getElementById('modal-type');
+      const modalAddBtn = document.getElementById('modal-add-btn');
+
+      let pending = {date: null, shift: null};
+
+      const calendar = new FullCalendar.Calendar(calendarEl, {
+        initialView: 'dayGridWeek',
+        firstDay: 1,
+        locale: 'es',
+        headerToolbar: { left: 'prev,next today', center: 'title', right: '' },
+        weekends: false,
+        dayCellDidMount: function(info){
+          if (info.el.querySelector('.cell-content-wrapper')) return;
+          const dateObj = info.date;
+          const dateStr = isoDate(dateObj);
+          
+          const wrapper = document.createElement('div');
+          wrapper.className = 'cell-content-wrapper';
+          
+          const frame = info.el.querySelector('.fc-daygrid-day-frame');
+          if (frame) {
+              const container = document.createElement('div');
+              container.className = 'cell-shifts';
+              container.appendChild(createShiftDiv(dateStr, 'mañana'));
+              container.appendChild(createShiftDiv(dateStr, 'tarde'));
+              
+              wrapper.appendChild(container);
+              
+              const statsContainer = document.createElement('div');
+              statsContainer.className = 'stats-container';
+              statsContainer.id = `stats-container-${dateStr}`;
+              
+              frame.innerHTML = '';
+              frame.appendChild(wrapper);
+              frame.appendChild(statsContainer);
+          }
+        },
+        datesSet: function(){ rerenderVisibleCells(); }
+      });
+
+      calendar.render();
+
+      // --- Funciones de Cálculo y Renderizado de Estadísticas ---
+
+      // Función que calcula el total de turnos de un empleado
+      function getEmployeeStats(name){
+          const employeeData = data.filter(e => e.name === name);
+          const totalShifts = employeeData.length;
+          const presencialCount = employeeData.filter(e => e.tipo === 'presencial').length;
+          const teletrabajoCount = totalShifts - presencialCount;
+
+          const percentP = totalShifts > 0 ? Math.round((presencialCount / totalShifts) * 100) : 0;
+          const percentT = totalShifts > 0 ? Math.round((teletrabajoCount / totalShifts) * 100) : 0;
+
+          return { totalShifts, presencialCount, teletrabajoCount, percentP, percentT };
+      }
+      
+      // Renderiza las estadísticas SEMANALES (Totales) solo si es el Lunes (primer día, firstDay: 1)
+      function renderStatsContainer(dateStr, dayIndex){
+          const statsContainer = document.getElementById(`stats-container-${dateStr}`);
+          if (!statsContainer) return;
+          statsContainer.innerHTML = '';
+
+          // 1. Renderizar estadísticas SEMANALES (Totales) por empleado - SOLO EN EL LUNES (dayIndex 0)
+          if(dayIndex === 0){
+            const allEmployeeNames = Array.from(modalName.options).map(opt => opt.value).sort();
+            
+            const statsList = document.createElement('ul');
+            statsList.className = 'employee-stats-list';
+            statsContainer.appendChild(statsList);
+            
+            // Título para las estadísticas semanales
+            const statsTitle = document.createElement('div');
+            statsTitle.style.fontWeight = 'bold';
+            statsTitle.textContent = 'Estadísticas Totales (Histórico):';
+            statsList.appendChild(statsTitle);
+
+
+            allEmployeeNames.forEach(name => {
+                const stats = getEmployeeStats(name);
+                const listItem = document.createElement('li');
+                listItem.innerHTML = `
+                    <span>${name}</span>
+                    <span>
+                        <span style="color:#28a745; font-weight:bold">${stats.percentP}% P</span> / 
+                        <span style="color:#007bff; font-weight:bold">${stats.percentT}% T</span>
+                    </span>
+                `;
+                statsList.appendChild(listItem);
+            });
+          }
+
+
+          // 2. Renderizar estadísticas del DÍA (Total) - SIEMPRE
+          const dayEntries = data.filter(e => e.date === dateStr);
+          const totalShiftsDay = dayEntries.length;
+          const presencialDayCount = dayEntries.filter(e => e.tipo === 'presencial').length;
+          const teletrabajoDayCount = totalShiftsDay - presencialDayCount;
+
+          const percentPDay = totalShiftsDay > 0 ? Math.round((presencialDayCount / totalShiftsDay) * 100) : 0;
+          const percentTDay = totalShiftsDay > 0 ? Math.round((teletrabajoDayCount / totalShiftsDay) * 100) : 0;
+
+          const dayStatsDiv = document.createElement('div');
+          dayStatsDiv.className = 'day-stats';
+          dayStatsDiv.innerHTML = `
+              Total Día: 
+              <span style="color:#28a745">${percentPDay}% P</span> / 
+              <span style="color:#007bff">${percentTDay}% T</span>
+          `;
+          statsContainer.appendChild(dayStatsDiv);
+      }
+
+
+      // --- Funciones de Calendarización y Datos ---
+
+      function createShiftDiv(dateStr, shift){
+        const shiftDiv = document.createElement('div');
+        shiftDiv.className = 'shift';
+        const header = document.createElement('div');
+        header.className = 'shift-header';
+        const title = document.createElement('div');
+        title.id = `title-${dateStr}-${shift}`;
+        title.innerHTML = shift === 'mañana' ? 'Mañana' : 'Tarde';
+        const addBtn = document.createElement('button'); addBtn.type = 'button'; addBtn.className = 'add-btn'; addBtn.textContent = 'Añadir';
+        addBtn.addEventListener('click', function(){ openAddModal(dateStr, shift); });
+        header.appendChild(title); header.appendChild(addBtn);
+        shiftDiv.appendChild(header);
+        const list = document.createElement('div'); list.className = 'list';
+        shiftDiv.appendChild(list);
+        renderShiftList(dateStr, shift, list);
+        return shiftDiv;
+      }
+
+      function renderShiftList(dateStr, shift, listEl){
+        listEl.innerHTML = '';
+        const entries = data.filter(e => e.date === dateStr && e.shift === shift);
+        const countP = entries.filter(e=>e.tipo==='presencial').length;
+        const countT = entries.filter(e=>e.tipo==='teletrabajo').length;
+        const titleDiv = document.getElementById(`title-${dateStr}-${shift}`);
+        if(titleDiv) titleDiv.innerHTML = `<strong>${shift === 'mañana' ? 'Mañana' : 'Tarde'}</strong> (${countP}P/${countT}T)`;
+
+        entries.forEach(entry => {
+          const item = document.createElement('div'); item.className = 'entry ' + entry.tipo;
+          item.title = `${entry.tipo === 'presencial' ? 'Presencial' : 'Teletrabajo'}`;
+          const text = document.createElement('span');
+          text.textContent = entry.name;
+          const del = document.createElement('button'); del.className = 'del'; del.innerHTML = '✖';
+          del.addEventListener('click', function(){ if(confirm('Eliminar a "'+entry.name+'" de '+dateStr+' ('+shift+')?')) removeEntry(entry.id); });
+          item.appendChild(text); item.appendChild(del); listEl.appendChild(item);
+        });
+      }
+
+      function rerenderVisibleCells(){
+        const frames = calendarEl.querySelectorAll('.fc-daygrid-day-frame');
+        frames.forEach((frame, index) => {
+          const parentTd = frame.parentElement;
+          const dateStr = parentTd && parentTd.getAttribute('data-date');
+          if (!dateStr) return;
+          
+          const morningList = frame.querySelector('.shift:nth-child(1) .list');
+          const afternoonList = frame.querySelector('.shift:nth-child(2) .list');
+          if(morningList) renderShiftList(dateStr,'mañana',morningList);
+          if(afternoonList) renderShiftList(dateStr,'tarde',afternoonList);
+          
+          // Renderizar el contenedor de estadísticas
+          // El índice 0 corresponde al Lunes (por firstDay: 1 y weekends: false)
+          renderStatsContainer(dateStr, index); 
+        });
+      }
+
+      function openAddModal(dateStr, shift){ pending.date=dateStr; pending.shift=shift;
+        modalDate.textContent = `${dateStr} — ${shift==='mañana'?'Mañana':'Tarde'}`;
+        modalName.selectedIndex = 0; modalType.value='presencial';
+        modalCard.style.top='50px'; modalCard.style.left='50px';
+        modal.classList.add('open'); modal.setAttribute('aria-hidden','false'); modalName.focus();
+      }
+
+      function addEntryModal(){
+        const name = modalName.value;
+        const tipo = modalType.value;
+        
+        // --- VALIDACIÓN DE DUPLICADOS ---
+        const isDuplicate = data.some(e => 
+            e.date === pending.date && 
+            e.shift === pending.shift && 
+            e.name === name
+        );
+
+        if(isDuplicate){
+            alert(`"${name}" ya está registrado en el turno de ${pending.shift} del día ${pending.date}.`);
+            return; 
+        }
+
+        if(name){
+          const id='e_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
+          data.push({id:id,date:pending.date,shift:pending.shift,name:name,tipo:tipo});
+          saveData(); 
+          modal.classList.remove('open'); 
+          rerenderVisibleCells();
+        }
+      }
+
+      modalAddBtn.addEventListener('click', addEntryModal);
+      modalName.addEventListener('keydown', function(e){ if(e.key==='Enter'){ addEntryModal(); } });
+      modalType.addEventListener('keydown', function(e){ if(e.key==='Enter'){ addEntryModal(); } });
+
+      // Drag modal (código de arrastrar existente)
+      let isDragging = false, startX, startY;
+      modalHeader.addEventListener('mousedown', function(e){
+        isDragging=true;
+        startX=e.clientX - modalCard.offsetLeft;
+        startY=e.clientY - modalCard.offsetTop;
+        e.preventDefault(); 
+      });
+      document.addEventListener('mousemove', function(e){
+        if(isDragging){
+          modalCard.style.left = (e.clientX - startX) + 'px';
+          modalCard.style.top = (e.clientY - startY) + 'px';
+        }
+      });
+      document.addEventListener('mouseup', function(){ isDragging=false; });
+
+      modal.addEventListener('click', function(e){ if(e.target===modal) modal.classList.remove('open'); });
+      document.addEventListener('keydown', function(e){ if(e.key==='Escape') modal.classList.remove('open'); });
+
+      function removeEntry(id){ data=data.filter(d=>d.id!==id); saveData(); rerenderVisibleCells(); }
+      function saveData(){ localStorage.setItem(storageKey,JSON.stringify(data)); }
+      function loadData(){ try{const raw=localStorage.getItem(storageKey); return raw?JSON.parse(raw):[];}catch(err){return[];} }
+      function isoDate(d){ const y=d.getFullYear(); const m=String(d.getMonth()+1).padStart(2,'0'); const day=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${day}`; }
+
+      document.getElementById('exportBtn').addEventListener('click', function(){ const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='asistencia_export.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); });
+      document.getElementById('importBtn').addEventListener('click', function(){ const txt=prompt('Pega aquí el JSON exportado (sobrescribirá los datos actuales)'); if(!txt) return; try{const parsed=JSON.parse(txt); if(!Array.isArray(parsed)) throw new Error('Formato incorrecto'); data=parsed; saveData(); rerenderVisibleCells(); alert('Importado correctamente.'); }catch(err){alert('JSON inválido: '+err.message);} });
+      document.getElementById('clearBtn').addEventListener('click', function(){ if(confirm('Borrar TODOS los datos guardados en este navegador?')){data=[]; saveData(); rerenderVisibleCells();} });
+
+      rerenderVisibleCells();
+    })();
+  </script>
+</body>
+</html>
